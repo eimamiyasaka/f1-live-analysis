@@ -2484,3 +2484,8 @@ void FJarvisAnalysisClient::SendRequest(
 *This document is part of the F1 Jarvis TORCS project. For questions or contributions, contact the development team.*
 
 This document is more accurate for the real-time telemetry analysis part of the project.
+
+LiveKit, Jambonz
+n8n
+
+Antigravity (?)
