@@ -1575,3 +1575,136 @@ uvicorn jarvis_granite.live.main:app --reload --port 8001
 ---
 
 *F1 Jarvis TORCS Project | Team 17*
+
+Development Order for Jarvis-Granite Live Telemetry
+Phase 1: Core Infrastructure
+1. Configuration & Environment Setup
+
+Set up project structure
+Create configuration models (config.py, live.yaml)
+Implement environment variable loading
+Set up logging infrastructure
+
+2. Data Schemas
+
+Define Pydantic models for telemetry data (TelemetryData, TireTemps, TireWear, GForces)
+Define WebSocket message schemas (session_init, telemetry, ai_response, error)
+Define event schemas (Event, Priority enum)
+
+3. Session Context
+
+Implement LiveSessionContext dataclass
+Build rolling telemetry buffer (deque with 600-point capacity)
+Implement conversation history tracking
+Create to_prompt_context() method for LLM injection
+
+
+Phase 2: Telemetry Processing (No External Dependencies)
+4. Telemetry Agent
+
+Implement rule-based telemetry parsing and validation
+Build event detection logic (fuel, tire, gap, lap completion)
+Implement threshold checking against configuration
+Target: <50ms processing latency
+
+5. WebSocket Server
+
+Set up FastAPI WebSocket endpoint (/live)
+Implement connection handling
+Build message routing (session_init, telemetry, text_query, config_update, session_end)
+Add heartbeat mechanism
+
+
+Phase 3: LLM Integration
+6. LLM Client (LangChain + Granite)
+
+Implement GraniteClient with LangChain wrapper
+Set up WatsonxLLM integration
+Create prompt templates (PromptTemplate objects)
+Add LangSmith callbacks for observability (optional)
+
+7. Race Engineer Agent
+
+Implement proactive response generation (event-triggered)
+Implement reactive response generation (query-triggered)
+Connect to LLM client
+Target: <2000ms LLM response time
+
+
+Phase 4: Custom Orchestrator
+8. Priority Queue System
+
+Implement heapq-based priority queue
+Define priority levels (Critical, High, Medium, Low)
+Build event queueing logic
+
+9. Orchestrator Core
+
+Implement JarvisLiveOrchestrator class (~200-300 LOC)
+Build event router
+Connect Telemetry Agent → Race Engineer Agent pipeline
+Implement queue processing logic
+
+10. Interrupt Handler
+
+Implement sentence completion detection
+Build pending interrupt queue
+Implement priority-based interrupt logic (Critical/High interrupts Medium/Low)
+
+
+Phase 5: Voice Infrastructure
+11. Watson TTS/STT Clients
+
+Implement WatsonTTSClient with Tenacity retry
+Implement WatsonSTTClient with Tenacity retry
+Configure exponential backoff (3 attempts, 0.5-4s wait)
+Target: <500ms TTS latency
+
+12. LiveKit Integration
+
+Implement VoiceAgent with LiveKit room connection
+Build audio track publishing (AI → Driver)
+Build audio track subscription (Driver → AI)
+Implement token generation
+
+13. Voice Pipeline
+
+Connect STT → Orchestrator → TTS flow
+Implement audio frame streaming
+Add silence detection for speech segmentation
+Implement sentence splitting for interrupt handling
+
+
+Phase 6: Integration & Testing
+14. End-to-End Integration
+
+Wire all components together in main.py
+Implement session lifecycle (init → active → end)
+Add LiveKit token to session_confirmed response
+Test full pipeline: Telemetry → Event → LLM → Voice
+
+15. Error Handling
+
+Implement error codes (LLM_TIMEOUT, TTS_ERROR, LIVEKIT_ERROR, etc.)
+Add graceful degradation (text fallback if voice fails)
+Implement reconnection logic
+
+16. Performance Optimization
+
+Profile end-to-end latency (target: <3000ms)
+Optimize bottlenecks
+Add metrics logging
+
+
+Phase 7: Deployment
+17. Containerization
+
+Create Dockerfile
+Configure for IBM Cloud Code Engine
+Set up secrets management
+
+18. LiveKit Deployment
+
+Deploy LiveKit server (self-hosted on IBM Cloud K8s or LiveKit Cloud)
+Configure TURN servers for NAT traversal
+Test WebRTC connectivity
