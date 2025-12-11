@@ -1587,6 +1587,8 @@ Set up logging infrastructure
 
 2. Data Schemas
 
+Eima - may need to adjust based on exact telemetry data schema received from AC, TORCS, FS
+
 Define Pydantic models for telemetry data (TelemetryData, TireTemps, TireWear, GForces)
 Define WebSocket message schemas (session_init, telemetry, ai_response, error)
 Define event schemas (Event, Priority enum)
