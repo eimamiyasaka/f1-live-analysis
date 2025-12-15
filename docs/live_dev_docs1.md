@@ -1710,3 +1710,5 @@ Set up secrets management
 Deploy LiveKit server (self-hosted on IBM Cloud K8s or LiveKit Cloud)
 Configure TURN servers for NAT traversal
 Test WebRTC connectivity
+
+run tests with python -m pytest tests/ -v
