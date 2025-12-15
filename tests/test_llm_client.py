@@ -107,7 +107,7 @@ class TestLLMClientCreation:
 
     def test_create_llm_client(self, mock_config):
         """Should create LLMClient instance."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -115,7 +115,7 @@ class TestLLMClientCreation:
 
     def test_llm_client_stores_config(self, mock_config):
         """LLMClient should store configuration."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -124,7 +124,7 @@ class TestLLMClientCreation:
 
     def test_llm_client_has_required_methods(self, mock_config):
         """LLMClient should have required public methods."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -135,7 +135,7 @@ class TestLLMClientCreation:
 
     def test_llm_client_default_values(self):
         """LLMClient should have sensible defaults."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(
             watsonx_url="https://test.com",
@@ -157,7 +157,7 @@ class TestPromptTemplates:
 
     def test_has_proactive_prompt_template(self, mock_config):
         """Should have proactive prompt template."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -166,7 +166,7 @@ class TestPromptTemplates:
 
     def test_has_reactive_prompt_template(self, mock_config):
         """Should have reactive prompt template."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -175,7 +175,7 @@ class TestPromptTemplates:
 
     def test_proactive_template_has_required_variables(self, mock_config):
         """Proactive template should accept event_type, event_data, context."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -191,7 +191,7 @@ class TestPromptTemplates:
 
     def test_reactive_template_has_required_variables(self, mock_config):
         """Reactive template should accept query and context."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -206,7 +206,7 @@ class TestPromptTemplates:
 
     def test_proactive_prompt_includes_event_type(self, mock_config):
         """Formatted proactive prompt should include event type."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -220,7 +220,7 @@ class TestPromptTemplates:
 
     def test_reactive_prompt_includes_query(self, mock_config):
         """Formatted reactive prompt should include the query."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -244,7 +244,7 @@ class TestProactiveResponseGeneration:
         self, mock_config, fuel_critical_event, session_context
     ):
         """generate_proactive_response should return a string."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -265,7 +265,7 @@ class TestProactiveResponseGeneration:
         self, mock_config, fuel_critical_event, session_context
     ):
         """Proactive response should incorporate event data."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -286,7 +286,7 @@ class TestProactiveResponseGeneration:
         self, mock_config, lap_complete_event, session_context
     ):
         """Proactive response should incorporate session context."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -307,7 +307,7 @@ class TestProactiveResponseGeneration:
         self, mock_config, session_context
     ):
         """Should handle different event types appropriately."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -343,7 +343,7 @@ class TestReactiveResponseGeneration:
         self, mock_config, session_context
     ):
         """generate_reactive_response should return a string."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -363,7 +363,7 @@ class TestReactiveResponseGeneration:
         self, mock_config, session_context
     ):
         """Reactive response should incorporate the query."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -383,7 +383,7 @@ class TestReactiveResponseGeneration:
         self, mock_config, session_context
     ):
         """Reactive response should incorporate session context."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -409,7 +409,7 @@ class TestContextFormatting:
 
     def test_format_context_for_prompt(self, mock_config, session_context):
         """Should format context into prompt-friendly string."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -421,7 +421,7 @@ class TestContextFormatting:
 
     def test_context_includes_fuel_info(self, mock_config, session_context):
         """Formatted context should include fuel information."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -431,7 +431,7 @@ class TestContextFormatting:
 
     def test_context_includes_tire_info(self, mock_config, session_context):
         """Formatted context should include tire information."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -441,7 +441,7 @@ class TestContextFormatting:
 
     def test_context_includes_position_info(self, mock_config, session_context):
         """Formatted context should include position information."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -459,7 +459,7 @@ class TestRetryLogic:
 
     def test_retry_config_stored(self, mock_config):
         """Should store retry configuration."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config, max_retries=5)
 
@@ -470,7 +470,7 @@ class TestRetryLogic:
     @pytest.mark.asyncio
     async def test_retries_on_http_error(self, mock_config, session_context):
         """Should retry on HTTP errors."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -480,7 +480,7 @@ class TestRetryLogic:
 
     def test_max_retries_configurable(self, mock_config):
         """Max retries should be configurable."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config, max_retries=5)
 
@@ -497,7 +497,7 @@ class TestResponseFormatting:
     @pytest.mark.asyncio
     async def test_response_is_cleaned(self, mock_config, session_context):
         """Response should be cleaned of extra whitespace."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -514,7 +514,7 @@ class TestResponseFormatting:
     @pytest.mark.asyncio
     async def test_empty_response_handled(self, mock_config, session_context):
         """Empty responses should be handled gracefully."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -539,7 +539,7 @@ class TestRaceEngineerPersonality:
 
     def test_proactive_prompt_has_race_engineer_context(self, mock_config):
         """Proactive prompt should establish race engineer role."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -556,7 +556,7 @@ class TestRaceEngineerPersonality:
 
     def test_reactive_prompt_has_race_engineer_context(self, mock_config):
         """Reactive prompt should establish race engineer role."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -579,7 +579,7 @@ class TestVerbosityLevels:
 
     def test_verbosity_affects_prompt(self, mock_config, session_context):
         """Verbosity setting should affect prompt generation."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client_minimal = LLMClient(**mock_config, verbosity="minimal")
         client_verbose = LLMClient(**mock_config, verbosity="verbose")
@@ -599,7 +599,7 @@ class TestVerbosityLevels:
 
     def test_default_verbosity_is_moderate(self, mock_config):
         """Default verbosity should be moderate."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
@@ -616,7 +616,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_handles_llm_error_gracefully(self, mock_config, session_context):
         """Should handle LLM errors gracefully."""
-        from jarvis_granite.agents.llm_client import LLMClient, LLMError
+        from jarvis_granite.llm import LLMClient, LLMError
 
         client = LLMClient(**mock_config)
 
@@ -632,7 +632,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_timeout_raises_llm_error(self, mock_config, session_context):
         """Timeout should raise LLMError after retries exhausted."""
-        from jarvis_granite.agents.llm_client import LLMClient, LLMError
+        from jarvis_granite.llm import LLMClient, LLMError
         import httpx
 
         client = LLMClient(**mock_config, max_retries=1)
@@ -659,7 +659,7 @@ class TestContextIntegration:
         self, mock_config, session_context
     ):
         """Should use context.to_prompt_context() for formatting."""
-        from jarvis_granite.agents.llm_client import LLMClient
+        from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
