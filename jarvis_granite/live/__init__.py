@@ -7,9 +7,11 @@ Provides real-time race engineering during active sessions.
 from jarvis_granite.live.context import LiveSessionContext
 from jarvis_granite.live.websocket_handler import WebSocketHandler
 from jarvis_granite.live.main import create_app
+from jarvis_granite.live.priority_queue import PriorityQueue
 
 __all__ = [
     "LiveSessionContext",
     "WebSocketHandler",
     "create_app",
+    "PriorityQueue",
 ]
