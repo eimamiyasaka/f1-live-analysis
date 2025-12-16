@@ -2,17 +2,22 @@
 WebSocket Handler for Jarvis-Granite Live Telemetry.
 
 Handles WebSocket connections, message routing, and session management.
+Integrates TelemetryAgent for event detection and RaceEngineerAgent
+for AI response generation.
 """
 
+import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import ValidationError
 
 from jarvis_granite.live.context import LiveSessionContext
 from jarvis_granite.schemas.telemetry import TelemetryData
+from jarvis_granite.schemas.events import Event, Priority
 from jarvis_granite.schemas.messages import (
     parse_client_message,
     SessionInitMessage,
@@ -22,7 +27,11 @@ from jarvis_granite.schemas.messages import (
     SessionEndMessage,
 )
 from jarvis_granite.agents.telemetry_agent import TelemetryAgent
-from config.config import ThresholdsConfig
+from jarvis_granite.agents.race_engineer_agent import RaceEngineerAgent
+from jarvis_granite.llm import LLMClient, LLMError
+from config.config import ThresholdsConfig, LiveConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow_iso() -> str:
@@ -30,27 +39,63 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _generate_response_id() -> str:
+    """Generate a unique response ID."""
+    import uuid
+    return f"resp_{uuid.uuid4().hex[:12]}"
+
+
 class WebSocketHandler:
     """
     Handles WebSocket connections and message routing.
 
     Manages active sessions, routes messages to appropriate handlers,
-    and coordinates between the telemetry agent and session context.
+    and coordinates between the telemetry agent and race engineer agent.
 
     Attributes:
         active_sessions: Dictionary of active session data keyed by session_id
         telemetry_agent: Agent for rule-based telemetry processing
+        race_engineer_agent: Agent for LLM-powered response generation
     """
 
-    def __init__(self, thresholds: Optional[ThresholdsConfig] = None):
+    def __init__(
+        self,
+        thresholds: Optional[ThresholdsConfig] = None,
+        llm_client: Optional[LLMClient] = None,
+        config: Optional[LiveConfig] = None,
+    ):
         """
         Initialize WebSocketHandler.
 
         Args:
             thresholds: Optional threshold configuration for telemetry agent
+            llm_client: Optional LLM client for race engineer agent
+            config: Optional live configuration
         """
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         self.telemetry_agent = TelemetryAgent(thresholds=thresholds)
+        self.config = config or LiveConfig()
+
+        # Initialize race engineer agent if LLM client provided
+        if llm_client is not None:
+            self.race_engineer_agent = RaceEngineerAgent(
+                llm_client=llm_client,
+                verbosity=self.config.verbosity.level,
+            )
+        else:
+            self.race_engineer_agent = None
+            logger.warning(
+                "No LLM client provided - AI responses will be disabled"
+            )
+
+    def set_race_engineer_agent(self, agent: RaceEngineerAgent) -> None:
+        """
+        Set the race engineer agent.
+
+        Args:
+            agent: RaceEngineerAgent instance
+        """
+        self.race_engineer_agent = agent
 
     async def handle_connection(self, websocket) -> None:
         """
@@ -86,6 +131,7 @@ class WebSocketHandler:
                     session_id = result["session_id"]
 
         except Exception as e:
+            logger.error(f"WebSocket error: {e}")
             # Clean up session on disconnect
             if session_id and session_id in self.active_sessions:
                 del self.active_sessions[session_id]
@@ -166,11 +212,17 @@ class WebSocketHandler:
             track_name=message.track_name
         )
 
+        # Update verbosity if provided in config
+        verbosity = message.config.get("verbosity", self.config.verbosity.level)
+        if self.race_engineer_agent:
+            self.race_engineer_agent.set_verbosity(verbosity)
+
         # Store session
         self.active_sessions[message.session_id] = {
             "context": context,
             "config": message.config.copy(),
-            "websocket": websocket
+            "websocket": websocket,
+            "verbosity": verbosity,
         }
 
         # Generate LiveKit token (placeholder - real implementation would use LiveKit SDK)
@@ -182,13 +234,14 @@ class WebSocketHandler:
             "session_id": message.session_id,
             "config": message.config,
             "livekit": {
-                "url": "wss://livekit.example.com",
+                "url": self.config.livekit.url or "wss://livekit.example.com",
                 "token": livekit_token,
                 "room_name": f"{message.session_id}_voice"
             }
         }
 
         await websocket.send_json(response)
+        logger.info(f"Session {message.session_id} initialized for {message.track_name}")
 
         return {"session_id": message.session_id}
 
@@ -198,7 +251,7 @@ class WebSocketHandler:
         websocket,
         session_id: Optional[str]
     ) -> None:
-        """Handle telemetry message."""
+        """Handle telemetry message and generate AI responses for events."""
         # Check session exists
         if not session_id or session_id not in self.active_sessions:
             await self._send_error(
@@ -228,12 +281,93 @@ class WebSocketHandler:
         # Detect events using telemetry agent
         events = self.telemetry_agent.detect_events(message.data, context)
 
-        # Process detected events (would queue for orchestrator in full implementation)
-        for event in events:
-            # Log or handle events
-            pass
+        # Process detected events
+        if events and self.race_engineer_agent:
+            # Process highest priority event only to avoid message spam
+            await self._process_events(events, context, websocket)
 
         return None
+
+    async def _process_events(
+        self,
+        events: List[Event],
+        context: LiveSessionContext,
+        websocket
+    ) -> None:
+        """
+        Process detected events and generate AI responses.
+
+        Only processes the highest priority event to avoid message spam.
+
+        Args:
+            events: List of detected events
+            context: Session context
+            websocket: WebSocket connection
+        """
+        if not events or not self.race_engineer_agent:
+            return
+
+        # Sort by priority (lower value = higher priority)
+        events.sort(key=lambda e: e.priority)
+
+        # Get highest priority event
+        event = events[0]
+
+        # Check proactive message rate limiting
+        min_interval = self.config.min_proactive_interval_seconds
+        if not context.can_send_proactive(min_interval):
+            # Skip if we recently sent a message (unless critical)
+            if event.priority != Priority.CRITICAL:
+                logger.debug(f"Skipping {event.type} - rate limited")
+                return
+
+        start_time = time.time()
+
+        try:
+            # Generate response
+            response_text = await self.race_engineer_agent.generate_proactive_response(
+                event=event,
+                context=context,
+            )
+
+            # Calculate latency
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            # Send AI response
+            ai_response = {
+                "type": "ai_response",
+                "response_id": _generate_response_id(),
+                "timestamp": _utcnow_iso(),
+                "trigger": event.type,
+                "text": response_text,
+                "priority": event.priority.name.lower(),
+                "metadata": {
+                    "latency_ms": latency_ms,
+                    "tokens_used": None,  # Would be populated by actual LLM
+                }
+            }
+
+            await websocket.send_json(ai_response)
+
+            # Mark proactive message sent
+            context.mark_proactive_sent()
+
+            # Add to conversation history
+            context.add_exchange(f"[Event: {event.type}]", response_text)
+
+            logger.info(
+                f"AI response for {event.type} sent in {latency_ms}ms"
+            )
+
+        except LLMError as e:
+            logger.error(f"LLM error for {event.type}: {e}")
+            await self._send_error(
+                websocket,
+                "LLM_ERROR",
+                f"Failed to generate response: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Error processing event {event.type}: {e}")
 
     async def _handle_text_query(
         self,
@@ -241,7 +375,7 @@ class WebSocketHandler:
         websocket,
         session_id: Optional[str]
     ) -> None:
-        """Handle text query message."""
+        """Handle text query message and generate AI response."""
         # Check session exists
         if not session_id or session_id not in self.active_sessions:
             await self._send_error(
@@ -265,11 +399,61 @@ class WebSocketHandler:
         session = self.active_sessions[session_id]
         context = session["context"]
 
-        # In full implementation, this would:
-        # 1. Queue the query for the orchestrator
-        # 2. Get AI response
-        # 3. Send ai_response message back
-        # For now, just acknowledge receipt
+        # Check if race engineer agent is available
+        if not self.race_engineer_agent:
+            await self._send_error(
+                websocket,
+                "LLM_ERROR",
+                "AI responses not available - no LLM configured"
+            )
+            return None
+
+        start_time = time.time()
+
+        try:
+            # Generate response
+            response_text = await self.race_engineer_agent.generate_reactive_response(
+                query=message.query,
+                context=context,
+            )
+
+            # Calculate latency
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            # Send AI response
+            ai_response = {
+                "type": "ai_response",
+                "response_id": _generate_response_id(),
+                "timestamp": _utcnow_iso(),
+                "trigger": "text_query",
+                "text": response_text,
+                "priority": "high",  # Driver queries are high priority
+                "metadata": {
+                    "latency_ms": latency_ms,
+                    "tokens_used": None,
+                }
+            }
+
+            await websocket.send_json(ai_response)
+
+            logger.info(
+                f"AI response for query '{message.query[:30]}...' sent in {latency_ms}ms"
+            )
+
+        except LLMError as e:
+            logger.error(f"LLM error for query: {e}")
+            await self._send_error(
+                websocket,
+                "LLM_ERROR",
+                f"Failed to generate response: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            await self._send_error(
+                websocket,
+                "LLM_ERROR",
+                f"Unexpected error: {str(e)}"
+            )
 
         return None
 
@@ -305,6 +489,13 @@ class WebSocketHandler:
         # Update session config
         session["config"].update(message.config)
 
+        # Update verbosity if changed
+        if "verbosity" in message.config and self.race_engineer_agent:
+            new_verbosity = message.config["verbosity"]
+            self.race_engineer_agent.set_verbosity(new_verbosity)
+            session["verbosity"] = new_verbosity
+            logger.info(f"Updated verbosity to {new_verbosity}")
+
         return None
 
     async def _handle_session_end(
@@ -316,6 +507,7 @@ class WebSocketHandler:
         """Handle session end message."""
         if session_id and session_id in self.active_sessions:
             del self.active_sessions[session_id]
+            logger.info(f"Session {session_id} ended")
 
         return None
 
@@ -352,6 +544,7 @@ class WebSocketHandler:
         }
 
         await websocket.send_json(error)
+        logger.warning(f"Sent error {error_code}: {message}")
 
     def _generate_livekit_token(self, session_id: str) -> str:
         """

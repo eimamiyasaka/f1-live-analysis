@@ -1,22 +1,29 @@
 """
 LLM Client for Jarvis-Granite Live Telemetry.
 
-Provides interface to IBM Granite LLM via WatsonX for generating
-race engineer responses. Uses prompt templates for consistent
-personality and context injection.
+Provides interface to IBM Granite LLM via WatsonX using LangChain.
+Implements retry logic with Tenacity for robust API calls.
 
 Features:
-- Proactive responses (event-triggered)
-- Reactive responses (query-driven)
-- Configurable verbosity levels
-- Retry logic with Tenacity
+- LangChain integration with WatsonxLLM
+- Tenacity retry with exponential backoff
+- Async support for non-blocking calls
+- Configurable model parameters
 """
 
-import json
-from typing import Any, Dict, Optional, Union
+import asyncio
+import logging
+from typing import Optional
 
-from jarvis_granite.schemas.events import Event
-from jarvis_granite.live.context import LiveSessionContext
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class LLMError(Exception):
@@ -24,82 +31,21 @@ class LLMError(Exception):
     pass
 
 
-# =============================================================================
-# PROMPT TEMPLATES
-# =============================================================================
-
-PROACTIVE_TEMPLATE_MINIMAL = """You are a concise F1 race engineer. Alert the driver about: {event_type}.
-Data: {event_data}
-Context: {context}
-Respond in under 15 words."""
-
-PROACTIVE_TEMPLATE_MODERATE = """You are an experienced F1 race engineer speaking to your driver during a race.
-An event has been detected that requires your attention.
-
-Event Type: {event_type}
-Event Data: {event_data}
-
-Current Session Context:
-{context}
-
-Provide a clear, actionable radio message (1-2 sentences). Be direct but informative.
-Focus on what the driver needs to know and any recommended action."""
-
-PROACTIVE_TEMPLATE_VERBOSE = """You are an experienced F1 race engineer speaking to your driver during a race.
-An important event has been detected.
-
-Event Type: {event_type}
-Event Details: {event_data}
-
-Current Session Context:
-{context}
-
-Provide a detailed radio message explaining:
-1. What happened
-2. The implications
-3. Recommended action
-Keep it under 4 sentences for clarity during racing."""
-
-REACTIVE_TEMPLATE_MINIMAL = """You are a concise F1 race engineer. Driver asks: "{query}"
-Context: {context}
-Answer in under 15 words."""
-
-REACTIVE_TEMPLATE_MODERATE = """You are an experienced F1 race engineer responding to your driver's question during a race.
-
-Driver's Question: "{query}"
-
-Current Session Context:
-{context}
-
-Provide a clear, helpful response (1-2 sentences). Be direct and informative.
-Focus on answering the question with relevant data from the context."""
-
-REACTIVE_TEMPLATE_VERBOSE = """You are an experienced F1 race engineer responding to your driver's question during a race.
-
-Driver's Question: "{query}"
-
-Current Session Context:
-{context}
-
-Provide a comprehensive response that:
-1. Directly answers the question
-2. Includes relevant supporting data
-3. Offers any strategic insights if applicable
-Keep it under 4 sentences for clarity during racing."""
-
-
 class LLMClient:
     """
-    Client for IBM Granite LLM via WatsonX.
+    Client for IBM Granite LLM via WatsonX using LangChain.
 
-    Generates race engineer responses for both proactive (event-triggered)
-    and reactive (query-driven) scenarios.
+    This is a lightweight wrapper around WatsonxLLM that handles:
+    - Connection configuration
+    - Retry logic with Tenacity
+    - Async invocation
+
+    The actual prompt formatting is handled by RaceEngineerAgent.
 
     Attributes:
         model_id: WatsonX model identifier
         max_tokens: Maximum tokens for response generation
         temperature: LLM temperature for response variety
-        verbosity: Response verbosity level (minimal, moderate, verbose)
         max_retries: Maximum retry attempts for failed requests
     """
 
@@ -111,8 +57,9 @@ class LLMClient:
         model_id: str = "ibm/granite-3-8b-instruct",
         max_tokens: int = 150,
         temperature: float = 0.7,
-        verbosity: str = "moderate",
-        max_retries: int = 3
+        max_retries: int = 3,
+        min_retry_wait: float = 1.0,
+        max_retry_wait: float = 5.0,
     ):
         """
         Initialize LLM Client.
@@ -124,8 +71,9 @@ class LLMClient:
             model_id: Model identifier (default: ibm/granite-3-8b-instruct)
             max_tokens: Maximum response tokens (default: 150)
             temperature: Response temperature (default: 0.7)
-            verbosity: Response verbosity - minimal, moderate, verbose (default: moderate)
             max_retries: Max retry attempts (default: 3)
+            min_retry_wait: Minimum wait between retries in seconds (default: 1.0)
+            max_retry_wait: Maximum wait between retries in seconds (default: 5.0)
         """
         self.watsonx_url = watsonx_url
         self.watsonx_project_id = watsonx_project_id
@@ -133,181 +81,167 @@ class LLMClient:
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.temperature = temperature
-        self.verbosity = verbosity
         self.max_retries = max_retries
+        self.min_retry_wait = min_retry_wait
+        self.max_retry_wait = max_retry_wait
 
-        # Select templates based on verbosity
-        self._setup_templates()
+        # Initialize LLM instance (lazy initialization)
+        self._llm = None
+        self._llm_initialized = False
 
-    def _setup_templates(self) -> None:
-        """Set up prompt templates based on verbosity level."""
-        if self.verbosity == "minimal":
-            self.proactive_template = PROACTIVE_TEMPLATE_MINIMAL
-            self.reactive_template = REACTIVE_TEMPLATE_MINIMAL
-        elif self.verbosity == "verbose":
-            self.proactive_template = PROACTIVE_TEMPLATE_VERBOSE
-            self.reactive_template = REACTIVE_TEMPLATE_VERBOSE
-        else:  # moderate (default)
-            self.proactive_template = PROACTIVE_TEMPLATE_MODERATE
-            self.reactive_template = REACTIVE_TEMPLATE_MODERATE
-
-    def format_proactive_prompt(
-        self,
-        event_type: str,
-        event_data: Dict[str, Any],
-        context: str
-    ) -> str:
+    def _get_llm(self):
         """
-        Format proactive prompt for event-triggered response.
+        Get or create the WatsonxLLM instance.
 
-        Args:
-            event_type: Type of event (e.g., fuel_critical, tire_warning)
-            event_data: Event-specific data
-            context: Session context string
+        Uses lazy initialization to avoid import errors during testing.
 
         Returns:
-            Formatted prompt string
+            WatsonxLLM instance or None if not available
         """
-        # Format event data for readability
-        if isinstance(event_data, dict):
-            event_data_str = json.dumps(event_data, indent=2)
-        else:
-            event_data_str = str(event_data)
+        if self._llm_initialized:
+            return self._llm
 
-        return self.proactive_template.format(
-            event_type=event_type,
-            event_data=event_data_str,
-            context=context
-        )
+        try:
+            from langchain_ibm import WatsonxLLM
 
-    def format_reactive_prompt(
-        self,
-        query: str,
-        context: str
-    ) -> str:
+            self._llm = WatsonxLLM(
+                model_id=self.model_id,
+                url=self.watsonx_url,
+                project_id=self.watsonx_project_id,
+                apikey=self.watsonx_api_key,
+                params={
+                    "max_new_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                    "decoding_method": "greedy",
+                },
+            )
+            self._llm_initialized = True
+            logger.info(f"Initialized WatsonxLLM with model {self.model_id}")
+
+        except ImportError:
+            logger.warning(
+                "langchain_ibm not installed. LLM calls will use fallback."
+            )
+            self._llm = None
+            self._llm_initialized = True
+
+        except Exception as e:
+            logger.error(f"Failed to initialize WatsonxLLM: {e}")
+            self._llm = None
+            self._llm_initialized = True
+
+        return self._llm
+
+    async def invoke(self, prompt: str) -> str:
         """
-        Format reactive prompt for query-driven response.
+        Invoke the LLM with the given prompt.
+
+        Uses retry logic with exponential backoff for resilience.
 
         Args:
-            query: Driver's question
-            context: Session context string
-
-        Returns:
-            Formatted prompt string
-        """
-        return self.reactive_template.format(
-            query=query,
-            context=context
-        )
-
-    def format_context(
-        self,
-        context: Union[LiveSessionContext, str]
-    ) -> str:
-        """
-        Format session context for prompt injection.
-
-        Args:
-            context: LiveSessionContext instance or pre-formatted string
-
-        Returns:
-            Formatted context string
-        """
-        if isinstance(context, str):
-            return context
-
-        # Use context's built-in formatting method
-        return context.to_prompt_context()
-
-    async def generate_proactive_response(
-        self,
-        event: Event,
-        context: Union[LiveSessionContext, str]
-    ) -> str:
-        """
-        Generate proactive response for detected event.
-
-        Args:
-            event: Detected event
-            context: Session context
+            prompt: The formatted prompt to send to the LLM
 
         Returns:
             Generated response text
 
         Raises:
-            LLMError: If LLM invocation fails
+            LLMError: If LLM invocation fails after all retries
         """
-        context_str = self.format_context(context)
+        return await self._invoke_with_retry(prompt)
 
-        prompt = self.format_proactive_prompt(
-            event_type=event.type,
-            event_data=event.data,
-            context=context_str
-        )
-
-        try:
-            response = await self._invoke_llm(prompt)
-            return self._clean_response(response)
-        except Exception as e:
-            raise LLMError(f"Failed to generate proactive response: {e}") from e
-
-    async def generate_reactive_response(
-        self,
-        query: str,
-        context: Union[LiveSessionContext, str]
-    ) -> str:
+    async def _invoke_with_retry(self, prompt: str) -> str:
         """
-        Generate reactive response for driver query.
+        Invoke LLM with Tenacity retry logic.
+
+        Retries on transient errors with exponential backoff.
 
         Args:
-            query: Driver's question
-            context: Session context
+            prompt: The prompt to send
 
         Returns:
             Generated response text
 
         Raises:
-            LLMError: If LLM invocation fails
+            LLMError: If all retries are exhausted
         """
-        context_str = self.format_context(context)
-
-        prompt = self.format_reactive_prompt(
-            query=query,
-            context=context_str
+        # Create retry decorator dynamically to use instance config
+        retry_decorator = retry(
+            stop=stop_after_attempt(self.max_retries),
+            wait=wait_exponential(
+                multiplier=1,
+                min=self.min_retry_wait,
+                max=self.max_retry_wait
+            ),
+            retry=retry_if_exception_type((ConnectionError, TimeoutError, Exception)),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
         )
 
+        @retry_decorator
+        async def _do_invoke():
+            return await self._invoke_llm(prompt)
+
         try:
-            response = await self._invoke_llm(prompt)
+            response = await _do_invoke()
             return self._clean_response(response)
         except Exception as e:
-            raise LLMError(f"Failed to generate reactive response: {e}") from e
+            logger.error(f"LLM invocation failed after {self.max_retries} attempts: {e}")
+            raise LLMError(f"Failed to invoke LLM: {e}") from e
 
     async def _invoke_llm(self, prompt: str) -> str:
         """
-        Invoke the LLM with retry logic.
-
-        In production, this would use langchain_ibm.WatsonxLLM.
-        For testing, this method can be mocked.
+        Internal method to invoke the LLM.
 
         Args:
             prompt: Formatted prompt
 
         Returns:
-            LLM response text
+            Raw LLM response text
         """
-        # Placeholder for actual WatsonX invocation
-        # In production:
-        # from langchain_ibm import WatsonxLLM
-        # llm = WatsonxLLM(
-        #     model_id=self.model_id,
-        #     url=self.watsonx_url,
-        #     project_id=self.watsonx_project_id,
-        #     apikey=self.watsonx_api_key,
-        # )
-        # return await llm.ainvoke(prompt)
+        llm = self._get_llm()
 
-        # For now, return placeholder (will be mocked in tests)
-        return f"Response to: {prompt[:50]}..."
+        if llm is None:
+            # Fallback for testing or when LLM is not available
+            logger.warning("LLM not available, using fallback response")
+            return self._generate_fallback_response(prompt)
+
+        # Use asyncio to run the sync LLM call in a thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, llm.invoke, prompt)
+
+        return response
+
+    def _generate_fallback_response(self, prompt: str) -> str:
+        """
+        Generate a fallback response when LLM is not available.
+
+        This is used for testing or when the LLM service is unavailable.
+
+        Args:
+            prompt: The original prompt
+
+        Returns:
+            Fallback response text
+        """
+        # Extract key information from prompt for contextual fallback
+        prompt_lower = prompt.lower()
+
+        if "fuel" in prompt_lower and "critical" in prompt_lower:
+            return "Box box box! Fuel critical, pit this lap."
+        elif "fuel" in prompt_lower:
+            return "Fuel looking tight. Consider your pit window."
+        elif "tire" in prompt_lower and "critical" in prompt_lower:
+            return "Tires are gone! Box immediately."
+        elif "tire" in prompt_lower:
+            return "Tires are showing wear. Monitor carefully."
+        elif "gap" in prompt_lower:
+            return "Gap has changed. Adjust your pace accordingly."
+        elif "lap" in prompt_lower:
+            return "Good lap. Keep pushing."
+        elif "position" in prompt_lower:
+            return "Position update noted. Stay focused."
+        else:
+            return "Copy that. Monitoring the situation."
 
     def _clean_response(self, response: str) -> str:
         """
@@ -325,4 +259,27 @@ class LLMClient:
         # Strip whitespace and normalize
         cleaned = response.strip()
 
+        # Remove any potential prompt echoing
+        # Some models may echo parts of the prompt
+        if ":" in cleaned and cleaned.index(":") < 20:
+            # Check if it looks like a role prefix (e.g., "Engineer:")
+            potential_prefix = cleaned.split(":")[0].lower()
+            if any(role in potential_prefix for role in ["engineer", "ai", "assistant", "response"]):
+                cleaned = ":".join(cleaned.split(":")[1:]).strip()
+
         return cleaned
+
+    def invoke_sync(self, prompt: str) -> str:
+        """
+        Synchronous version of invoke for non-async contexts.
+
+        Args:
+            prompt: The formatted prompt
+
+        Returns:
+            Generated response text
+
+        Raises:
+            LLMError: If LLM invocation fails
+        """
+        return asyncio.run(self.invoke(prompt))

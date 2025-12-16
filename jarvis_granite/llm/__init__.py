@@ -3,7 +3,7 @@ LLM module for Jarvis-Granite Live Telemetry.
 
 This module contains the LLM client for IBM Granite via WatsonX:
 
-- LLMClient: Generates race engineer responses (proactive and reactive)
+- LLMClient: Wrapper around WatsonxLLM with retry logic
 - LLMError: Exception for LLM-related errors
 """
 

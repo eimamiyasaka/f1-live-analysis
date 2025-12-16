@@ -1,16 +1,14 @@
 """
-TDD Tests for LLM Client - Phase 2, Section 6
+TDD Tests for LLM Client and Race Engineer Agent - Phase 3, Section 6-7
 
 These tests define the expected behavior for:
 1. LLM Client initialization with WatsonX configuration
-2. Prompt template management (proactive/reactive)
-3. Response generation for events and queries
-4. Retry logic with Tenacity
-5. Context formatting for prompts
+2. LLM invocation with retry logic
+3. Race Engineer Agent prompt formatting and response generation
+4. Context formatting for prompts
+5. Verbosity levels
 
 Run with: pytest tests/test_llm_client.py -v
-
-Write these tests FIRST, watch them fail, then implement LLMClient to pass.
 """
 
 import pytest
@@ -122,16 +120,14 @@ class TestLLMClientCreation:
         assert client.model_id == "ibm/granite-3-8b-instruct"
         assert client.max_tokens == 150
 
-    def test_llm_client_has_required_methods(self, mock_config):
-        """LLMClient should have required public methods."""
+    def test_llm_client_has_invoke_method(self, mock_config):
+        """LLMClient should have invoke method."""
         from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
-        assert hasattr(client, 'generate_proactive_response')
-        assert callable(client.generate_proactive_response)
-        assert hasattr(client, 'generate_reactive_response')
-        assert callable(client.generate_reactive_response)
+        assert hasattr(client, 'invoke')
+        assert callable(client.invoke)
 
     def test_llm_client_default_values(self):
         """LLMClient should have sensible defaults."""
@@ -149,87 +145,136 @@ class TestLLMClientCreation:
 
 
 # =============================================================================
-# PROMPT TEMPLATES
+# LLM CLIENT INVOCATION
 # =============================================================================
 
-class TestPromptTemplates:
-    """Tests for prompt template management."""
+class TestLLMClientInvocation:
+    """Tests for LLM invocation."""
 
-    def test_has_proactive_prompt_template(self, mock_config):
-        """Should have proactive prompt template."""
+    @pytest.mark.asyncio
+    async def test_invoke_returns_string(self, mock_config):
+        """invoke should return a string."""
         from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
-        assert hasattr(client, 'proactive_template')
-        assert client.proactive_template is not None
+        # Mock the internal LLM call
+        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = "Test response"
 
-    def test_has_reactive_prompt_template(self, mock_config):
-        """Should have reactive prompt template."""
+            response = await client.invoke("Test prompt")
+
+            assert isinstance(response, str)
+            assert len(response) > 0
+
+    @pytest.mark.asyncio
+    async def test_invoke_cleans_response(self, mock_config):
+        """invoke should clean the response."""
         from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
-        assert hasattr(client, 'reactive_template')
-        assert client.reactive_template is not None
+        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = "  Response with spaces  \n\n"
 
-    def test_proactive_template_has_required_variables(self, mock_config):
-        """Proactive template should accept event_type, event_data, context."""
+            response = await client.invoke("Test prompt")
+
+            assert response == "Response with spaces"
+
+    @pytest.mark.asyncio
+    async def test_invoke_handles_empty_response(self, mock_config):
+        """invoke should handle empty responses."""
         from jarvis_granite.llm import LLMClient
 
         client = LLMClient(**mock_config)
 
-        # Should be able to format with these variables
-        formatted = client.format_proactive_prompt(
-            event_type="fuel_critical",
-            event_data={"laps": 1.5},
-            context="Test context"
-        )
+        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ""
 
-        assert isinstance(formatted, str)
-        assert len(formatted) > 0
+            response = await client.invoke("Test prompt")
 
-    def test_reactive_template_has_required_variables(self, mock_config):
-        """Reactive template should accept query and context."""
+            assert isinstance(response, str)
+
+
+# =============================================================================
+# RETRY LOGIC
+# =============================================================================
+
+class TestRetryLogic:
+    """Tests for retry logic with Tenacity."""
+
+    def test_retry_config_stored(self, mock_config):
+        """Should store retry configuration."""
         from jarvis_granite.llm import LLMClient
 
-        client = LLMClient(**mock_config)
+        client = LLMClient(**mock_config, max_retries=5)
 
-        # Should be able to format with these variables
-        formatted = client.format_reactive_prompt(
-            query="How are my tires?",
-            context="Test context"
-        )
+        assert client.max_retries == 5
 
-        assert isinstance(formatted, str)
-        assert len(formatted) > 0
-
-    def test_proactive_prompt_includes_event_type(self, mock_config):
-        """Formatted proactive prompt should include event type."""
+    def test_max_retries_configurable(self, mock_config):
+        """Max retries should be configurable."""
         from jarvis_granite.llm import LLMClient
 
-        client = LLMClient(**mock_config)
+        client = LLMClient(**mock_config, max_retries=5)
 
-        formatted = client.format_proactive_prompt(
-            event_type="tire_critical",
-            event_data={"temp": 115, "position": "fl"},
-            context="Lap 15, P3"
-        )
+        assert client.max_retries == 5
 
-        assert "tire" in formatted.lower() or "critical" in formatted.lower()
+    @pytest.mark.asyncio
+    async def test_raises_llm_error_on_failure(self, mock_config):
+        """Should raise LLMError after retries exhausted."""
+        from jarvis_granite.llm import LLMClient, LLMError
 
-    def test_reactive_prompt_includes_query(self, mock_config):
-        """Formatted reactive prompt should include the query."""
+        client = LLMClient(**mock_config, max_retries=1)
+
+        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.side_effect = Exception("LLM unavailable")
+
+            with pytest.raises(LLMError):
+                await client.invoke("Test prompt")
+
+
+# =============================================================================
+# RACE ENGINEER AGENT CREATION
+# =============================================================================
+
+class TestRaceEngineerAgentCreation:
+    """Tests for RaceEngineerAgent instantiation."""
+
+    def test_create_race_engineer_agent(self, mock_config):
+        """Should create RaceEngineerAgent instance."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        formatted = client.format_reactive_prompt(
-            query="What's my fuel situation?",
-            context="35L remaining"
-        )
+        assert agent is not None
 
-        assert "fuel" in formatted.lower()
+    def test_agent_has_required_methods(self, mock_config):
+        """RaceEngineerAgent should have required methods."""
+        from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
+
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
+
+        assert hasattr(agent, 'generate_proactive_response')
+        assert callable(agent.generate_proactive_response)
+        assert hasattr(agent, 'generate_reactive_response')
+        assert callable(agent.generate_reactive_response)
+
+    def test_agent_has_prompt_templates(self, mock_config):
+        """RaceEngineerAgent should have prompt templates."""
+        from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
+
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
+
+        assert hasattr(agent, 'proactive_prompt')
+        assert agent.proactive_prompt is not None
+        assert hasattr(agent, 'reactive_prompt')
+        assert agent.reactive_prompt is not None
 
 
 # =============================================================================
@@ -245,14 +290,15 @@ class TestProactiveResponseGeneration:
     ):
         """generate_proactive_response should return a string."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        # Mock the LLM call
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Box box box! Fuel critical."
 
-            response = await client.generate_proactive_response(
+            response = await agent.generate_proactive_response(
                 event=fuel_critical_event,
                 context=session_context
             )
@@ -266,13 +312,15 @@ class TestProactiveResponseGeneration:
     ):
         """Proactive response should incorporate event data."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Fuel critical, 1.5 laps remaining!"
 
-            await client.generate_proactive_response(
+            await agent.generate_proactive_response(
                 event=fuel_critical_event,
                 context=session_context
             )
@@ -287,13 +335,15 @@ class TestProactiveResponseGeneration:
     ):
         """Proactive response should incorporate session context."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Lap 15 complete."
 
-            await client.generate_proactive_response(
+            await agent.generate_proactive_response(
                 event=lap_complete_event,
                 context=session_context
             )
@@ -308,8 +358,10 @@ class TestProactiveResponseGeneration:
     ):
         """Should handle different event types appropriately."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
         events = [
             Event(type="fuel_critical", priority=Priority.CRITICAL,
@@ -320,11 +372,11 @@ class TestProactiveResponseGeneration:
                   data={"change": 1.5, "direction": "ahead"}, timestamp=3.0),
         ]
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Response"
 
             for event in events:
-                response = await client.generate_proactive_response(
+                response = await agent.generate_proactive_response(
                     event=event,
                     context=session_context
                 )
@@ -344,13 +396,15 @@ class TestReactiveResponseGeneration:
     ):
         """generate_reactive_response should return a string."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Tires are looking good."
 
-            response = await client.generate_reactive_response(
+            response = await agent.generate_reactive_response(
                 query="How are my tires?",
                 context=session_context
             )
@@ -364,13 +418,15 @@ class TestReactiveResponseGeneration:
     ):
         """Reactive response should incorporate the query."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "Fuel is at 35 liters."
 
-            await client.generate_reactive_response(
+            await agent.generate_reactive_response(
                 query="What's my fuel status?",
                 context=session_context
             )
@@ -384,13 +440,15 @@ class TestReactiveResponseGeneration:
     ):
         """Reactive response should incorporate session context."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
             mock_invoke.return_value = "You're in P3."
 
-            await client.generate_reactive_response(
+            await agent.generate_reactive_response(
                 query="What's my position?",
                 context=session_context
             )
@@ -398,6 +456,30 @@ class TestReactiveResponseGeneration:
             call_args = mock_invoke.call_args[0][0]
             # Context should be included
             assert "P3" in call_args or "3" in call_args or "Monza" in call_args
+
+    @pytest.mark.asyncio
+    async def test_reactive_response_stores_exchange(
+        self, mock_config, session_context
+    ):
+        """Reactive response should store exchange in conversation history."""
+        from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
+
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
+
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = "Tires are good."
+
+            await agent.generate_reactive_response(
+                query="How are my tires?",
+                context=session_context
+            )
+
+            # Check conversation history was updated
+            assert len(session_context.conversation_history) == 1
+            exchange = session_context.conversation_history[0]
+            assert "tires" in exchange["query"].lower()
 
 
 # =============================================================================
@@ -407,127 +489,31 @@ class TestReactiveResponseGeneration:
 class TestContextFormatting:
     """Tests for session context formatting."""
 
-    def test_format_context_for_prompt(self, mock_config, session_context):
-        """Should format context into prompt-friendly string."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        formatted = client.format_context(session_context)
+    def test_context_to_prompt_context(self, session_context):
+        """Session context should format to prompt-friendly string."""
+        formatted = session_context.to_prompt_context()
 
         assert isinstance(formatted, str)
         assert "Monza" in formatted
         assert "15" in formatted  # Lap number
 
-    def test_context_includes_fuel_info(self, mock_config, session_context):
+    def test_context_includes_fuel_info(self, session_context):
         """Formatted context should include fuel information."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        formatted = client.format_context(session_context)
+        formatted = session_context.to_prompt_context()
 
         assert "35" in formatted or "fuel" in formatted.lower()
 
-    def test_context_includes_tire_info(self, mock_config, session_context):
+    def test_context_includes_tire_info(self, session_context):
         """Formatted context should include tire information."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        formatted = client.format_context(session_context)
+        formatted = session_context.to_prompt_context()
 
         assert "tire" in formatted.lower() or "95" in formatted
 
-    def test_context_includes_position_info(self, mock_config, session_context):
+    def test_context_includes_position_info(self, session_context):
         """Formatted context should include position information."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        formatted = client.format_context(session_context)
+        formatted = session_context.to_prompt_context()
 
         assert "P3" in formatted or "position" in formatted.lower()
-
-
-# =============================================================================
-# RETRY LOGIC
-# =============================================================================
-
-class TestRetryLogic:
-    """Tests for retry logic with Tenacity."""
-
-    def test_retry_config_stored(self, mock_config):
-        """Should store retry configuration."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config, max_retries=5)
-
-        # Retry configuration should be stored
-        assert client.max_retries == 5
-        # Note: actual retry behavior tested via integration tests
-
-    @pytest.mark.asyncio
-    async def test_retries_on_http_error(self, mock_config, session_context):
-        """Should retry on HTTP errors."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        # Retry logic would be tested via integration tests
-        # Unit tests verify the retry decorator is applied
-        assert hasattr(client, '_invoke_llm')
-
-    def test_max_retries_configurable(self, mock_config):
-        """Max retries should be configurable."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config, max_retries=5)
-
-        assert client.max_retries == 5
-
-
-# =============================================================================
-# RESPONSE FORMATTING
-# =============================================================================
-
-class TestResponseFormatting:
-    """Tests for response formatting."""
-
-    @pytest.mark.asyncio
-    async def test_response_is_cleaned(self, mock_config, session_context):
-        """Response should be cleaned of extra whitespace."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
-            mock_invoke.return_value = "  Response with spaces  \n\n"
-
-            response = await client.generate_reactive_response(
-                query="Test",
-                context=session_context
-            )
-
-            assert response == "Response with spaces"
-
-    @pytest.mark.asyncio
-    async def test_empty_response_handled(self, mock_config, session_context):
-        """Empty responses should be handled gracefully."""
-        from jarvis_granite.llm import LLMClient
-
-        client = LLMClient(**mock_config)
-
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
-            mock_invoke.return_value = ""
-
-            response = await client.generate_reactive_response(
-                query="Test",
-                context=session_context
-            )
-
-            # Should return a fallback or empty string
-            assert isinstance(response, str)
 
 
 # =============================================================================
@@ -540,32 +526,27 @@ class TestRaceEngineerPersonality:
     def test_proactive_prompt_has_race_engineer_context(self, mock_config):
         """Proactive prompt should establish race engineer role."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        formatted = client.format_proactive_prompt(
-            event_type="fuel_warning",
-            event_data={"laps": 4},
-            context="Test context"
-        )
-
-        # Should contain race engineer or similar role context
-        prompt_lower = formatted.lower()
+        # Check the template includes race engineer role
+        template_str = agent.proactive_prompt.template
+        prompt_lower = template_str.lower()
         assert any(term in prompt_lower for term in
-                   ["race engineer", "engineer", "driver", "pit", "lap"])
+                   ["race engineer", "engineer", "driver", "f1"])
 
     def test_reactive_prompt_has_race_engineer_context(self, mock_config):
         """Reactive prompt should establish race engineer role."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        formatted = client.format_reactive_prompt(
-            query="How are my tires?",
-            context="Test context"
-        )
-
-        prompt_lower = formatted.lower()
+        template_str = agent.reactive_prompt.template
+        prompt_lower = template_str.lower()
         assert any(term in prompt_lower for term in
                    ["race engineer", "engineer", "driver", "respond"])
 
@@ -577,33 +558,43 @@ class TestRaceEngineerPersonality:
 class TestVerbosityLevels:
     """Tests for response verbosity control."""
 
-    def test_verbosity_affects_prompt(self, mock_config, session_context):
-        """Verbosity setting should affect prompt generation."""
+    def test_verbosity_affects_prompt(self, mock_config):
+        """Verbosity setting should affect prompt templates."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client_minimal = LLMClient(**mock_config, verbosity="minimal")
-        client_verbose = LLMClient(**mock_config, verbosity="verbose")
+        llm_client = LLMClient(**mock_config)
 
-        prompt_minimal = client_minimal.format_reactive_prompt(
-            query="Status?",
-            context="Test"
-        )
-        prompt_verbose = client_verbose.format_reactive_prompt(
-            query="Status?",
-            context="Test"
-        )
+        agent_minimal = RaceEngineerAgent(llm_client=llm_client, verbosity="minimal")
+        agent_verbose = RaceEngineerAgent(llm_client=llm_client, verbosity="verbose")
 
-        # Prompts should be different based on verbosity
-        assert prompt_minimal != prompt_verbose or \
-               client_minimal.verbosity != client_verbose.verbosity
+        # Templates should be different based on verbosity
+        assert agent_minimal.reactive_prompt.template != agent_verbose.reactive_prompt.template
 
     def test_default_verbosity_is_moderate(self, mock_config):
         """Default verbosity should be moderate."""
         from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        assert client.verbosity == "moderate"
+        assert agent.verbosity == "moderate"
+
+    def test_set_verbosity_changes_templates(self, mock_config):
+        """set_verbosity should update prompt templates."""
+        from jarvis_granite.llm import LLMClient
+        from jarvis_granite.agents import RaceEngineerAgent
+
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client, verbosity="minimal")
+
+        original_template = agent.reactive_prompt.template
+
+        agent.set_verbosity("verbose")
+
+        assert agent.verbosity == "verbose"
+        assert agent.reactive_prompt.template != original_template
 
 
 # =============================================================================
@@ -611,70 +602,56 @@ class TestVerbosityLevels:
 # =============================================================================
 
 class TestErrorHandling:
-    """Tests for error handling in LLM client."""
+    """Tests for error handling in Race Engineer Agent."""
 
     @pytest.mark.asyncio
     async def test_handles_llm_error_gracefully(self, mock_config, session_context):
-        """Should handle LLM errors gracefully."""
+        """Should propagate LLMError from client."""
         from jarvis_granite.llm import LLMClient, LLMError
+        from jarvis_granite.agents import RaceEngineerAgent
 
-        client = LLMClient(**mock_config)
+        llm_client = LLMClient(**mock_config)
+        agent = RaceEngineerAgent(llm_client=llm_client)
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
-            mock_invoke.side_effect = Exception("LLM unavailable")
+        with patch.object(llm_client, 'invoke', new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.side_effect = LLMError("LLM unavailable")
 
             with pytest.raises(LLMError):
-                await client.generate_reactive_response(
-                    query="Test",
-                    context=session_context
-                )
-
-    @pytest.mark.asyncio
-    async def test_timeout_raises_llm_error(self, mock_config, session_context):
-        """Timeout should raise LLMError after retries exhausted."""
-        from jarvis_granite.llm import LLMClient, LLMError
-        import httpx
-
-        client = LLMClient(**mock_config, max_retries=1)
-
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
-            mock_invoke.side_effect = httpx.TimeoutException("Timeout")
-
-            with pytest.raises(LLMError):
-                await client.generate_reactive_response(
+                await agent.generate_reactive_response(
                     query="Test",
                     context=session_context
                 )
 
 
 # =============================================================================
-# INTEGRATION WITH CONTEXT
+# FACTORY FUNCTION
 # =============================================================================
 
-class TestContextIntegration:
-    """Tests for integration with LiveSessionContext."""
+class TestFactoryFunction:
+    """Tests for create_race_engineer_agent factory function."""
 
-    @pytest.mark.asyncio
-    async def test_uses_context_to_prompt_context_method(
-        self, mock_config, session_context
-    ):
-        """Should use context.to_prompt_context() for formatting."""
-        from jarvis_granite.llm import LLMClient
+    def test_create_race_engineer_agent_factory(self):
+        """Factory should create configured agent."""
+        from jarvis_granite.agents import create_race_engineer_agent
 
-        client = LLMClient(**mock_config)
+        agent = create_race_engineer_agent(
+            watsonx_url="https://test.com",
+            watsonx_project_id="test-project",
+            watsonx_api_key="test-key",
+            verbosity="verbose"
+        )
 
-        # The context's to_prompt_context should be used
-        context_str = session_context.to_prompt_context()
+        assert agent is not None
+        assert agent.verbosity == "verbose"
 
-        with patch.object(client, '_invoke_llm', new_callable=AsyncMock) as mock_invoke:
-            mock_invoke.return_value = "Response"
+    def test_factory_creates_llm_client(self):
+        """Factory should create LLM client internally."""
+        from jarvis_granite.agents import create_race_engineer_agent
 
-            await client.generate_reactive_response(
-                query="Test",
-                context=session_context
-            )
+        agent = create_race_engineer_agent(
+            watsonx_url="https://test.com",
+            watsonx_project_id="test-project",
+            watsonx_api_key="test-key"
+        )
 
-            # Verify context was included in the prompt
-            call_args = mock_invoke.call_args[0][0]
-            # Should contain elements from context
-            assert "Monza" in call_args or session_context.track_name in call_args
+        assert agent.llm_client is not None
