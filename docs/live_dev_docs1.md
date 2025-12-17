@@ -1712,3 +1712,5 @@ Configure TURN servers for NAT traversal
 Test WebRTC connectivity
 
 run tests with python -m pytest tests/ -v
+
+livekit can't be installed through pip
