@@ -194,7 +194,9 @@
   - LangSmith Integration - Production LLM monitoring
 
   ---  
-  
+
+
+
   Running the Demo
 
   Option 1: Full Demo (Recommended for Screenshots)
@@ -260,3 +262,41 @@
   - Without IBM credentials: The system works with fallback responses (rule-based)
   - With IBM credentials: Full AI responses from Granite LLM
   - The demo script shows both scenarios
+
+● What the Demo Tests & Demonstrates
+
+  Session Lifecycle
+
+  - Session initialization with unique ID, track name, and driver config
+  - LiveKit token generation for WebRTC voice communication
+  - Clean session termination with resource cleanup
+
+  Real-Time Telemetry Processing
+
+  - WebSocket message routing - JSON telemetry ingestion at simulated race pace
+  - Context tracking - Fuel, tire temps, position, gaps updated in real-time
+
+  Event Detection & AI Response
+
+  | Scenario          | What's Tested                                         |
+  |-------------------|-------------------------------------------------------|
+  | Normal telemetry  | No false positives when values are safe               |
+  | Low fuel (8L)     | Triggers fuel_warning event, AI advises pit strategy  |
+  | Hot tires (118°C) | Triggers tire_critical event, AI warns of degradation |
+  | Driver query      | Reactive response to "What's my tire situation?"      |
+
+  End-to-End Pipeline
+
+  Telemetry JSON → Event Detection → Priority Queue → LLM → Text Response
+
+  What You Can Screenshot
+
+  1. Terminal output - Color-coded telemetry, events, and AI responses with latency metrics
+  2. Swagger UI (/docs) - Full API documentation
+  3. Health/Stats endpoints - System status and processing metrics
+  4. Test suite - 567 passing tests
+
+  With vs Without IBM Credentials
+
+  - With: Full Granite LLM responses (natural language race engineer)
+  - Without: Fallback rule-based responses (still functional, demonstrates graceful degradation)
