@@ -14,6 +14,7 @@ This agent:
 Target latency: <2000ms for LLM response
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -133,6 +134,10 @@ class RaceEngineerAgent:
 
         except LLMError:
             raise
+        except asyncio.TimeoutError:
+            # Propagate timeout errors for proper handling upstream
+            logger.error("Timeout during proactive response generation")
+            raise
         except Exception as e:
             logger.error(f"Error generating proactive response: {e}")
             raise LLMError(f"Failed to generate proactive response: {e}") from e
@@ -189,6 +194,10 @@ class RaceEngineerAgent:
             return response
 
         except LLMError:
+            raise
+        except asyncio.TimeoutError:
+            # Propagate timeout errors for proper handling upstream
+            logger.error("Timeout during reactive response generation")
             raise
         except Exception as e:
             logger.error(f"Error generating reactive response: {e}")

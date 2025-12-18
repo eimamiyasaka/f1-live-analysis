@@ -46,6 +46,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 from jarvis_granite.live.context import LiveSessionContext
 from jarvis_granite.live.orchestrator import JarvisLiveOrchestrator
+from jarvis_granite.live.errors import (
+    ErrorCode,
+    JarvisError,
+    LLMTimeoutError,
+    TTSError,
+    SessionNotFoundError,
+    ValidationError,
+    create_error_response,
+)
 from jarvis_granite.agents.telemetry_agent import TelemetryAgent
 from jarvis_granite.agents.race_engineer_agent import RaceEngineerAgent
 from jarvis_granite.schemas.telemetry import TelemetryData
@@ -366,16 +375,39 @@ class IntegrationPipeline:
                                     logger.error(f"Voice pipeline error: {e}")
                                     # Continue - AI response is still available
 
-                    except asyncio.TimeoutError:
+                    except asyncio.TimeoutError as e:
                         logger.error("LLM timeout during response generation")
-                        result["error"] = "LLM_TIMEOUT"
+                        result["error"] = ErrorCode.LLM_TIMEOUT.value
+                        result["error_details"] = {
+                            "code": ErrorCode.LLM_TIMEOUT.value,
+                            "message": "LLM request timed out",
+                            "is_transient": True,
+                        }
                     except Exception as e:
                         logger.error(f"Error generating AI response: {e}")
-                        result["error"] = str(e)
+                        if isinstance(e, JarvisError):
+                            result["error"] = e.error_code.value
+                            result["error_details"] = e.to_dict()
+                        else:
+                            result["error"] = ErrorCode.LLM_ERROR.value
+                            result["error_details"] = {
+                                "code": ErrorCode.LLM_ERROR.value,
+                                "message": str(e),
+                                "is_transient": False,
+                            }
 
         except Exception as e:
             logger.error(f"Error processing telemetry: {e}")
-            result["error"] = str(e)
+            if isinstance(e, JarvisError):
+                result["error"] = e.error_code.value
+                result["error_details"] = e.to_dict()
+            else:
+                result["error"] = ErrorCode.TELEMETRY_PROCESSING_ERROR.value
+                result["error_details"] = {
+                    "code": ErrorCode.TELEMETRY_PROCESSING_ERROR.value,
+                    "message": str(e),
+                    "is_transient": True,
+                }
 
         # Calculate latency
         result["latency_ms"] = int((time.time() - start_time) * 1000)
@@ -441,9 +473,28 @@ class IntegrationPipeline:
                 except Exception as e:
                     logger.error(f"Voice pipeline error: {e}")
 
+        except asyncio.TimeoutError:
+            logger.error("LLM timeout handling query")
+            result["error"] = ErrorCode.LLM_TIMEOUT.value
+            result["error_details"] = {
+                "code": ErrorCode.LLM_TIMEOUT.value,
+                "message": "LLM request timed out",
+                "is_transient": True,
+            }
+            result["response"] = "Sorry, the AI is taking too long. Please try again."
+
         except Exception as e:
             logger.error(f"Error handling query: {e}")
-            result["error"] = str(e)
+            if isinstance(e, JarvisError):
+                result["error"] = e.error_code.value
+                result["error_details"] = e.to_dict()
+            else:
+                result["error"] = ErrorCode.LLM_ERROR.value
+                result["error_details"] = {
+                    "code": ErrorCode.LLM_ERROR.value,
+                    "message": str(e),
+                    "is_transient": False,
+                }
             result["response"] = "Sorry, I couldn't process your request."
 
         result["latency_ms"] = int((time.time() - start_time) * 1000)
