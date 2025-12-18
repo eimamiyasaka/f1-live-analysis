@@ -1,8 +1,16 @@
 """
 FastAPI Application for Jarvis-Granite Live Telemetry.
 
+Phase 6, Section 14: End-to-End Integration
+
 Provides WebSocket endpoint at /live for real-time telemetry streaming
 and bidirectional communication with AI-powered race engineer responses.
+
+Full Pipeline: Telemetry -> Event -> LLM -> Voice
+- Session lifecycle management (init -> active -> end)
+- LiveKit token generation for voice communication
+- Interrupt handling for high-priority events
+- Statistics and health monitoring
 """
 
 import json
@@ -14,6 +22,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from jarvis_granite.live.integration_pipeline import IntegrationPipeline
 from jarvis_granite.live.websocket_handler import WebSocketHandler
 from jarvis_granite.llm import LLMClient
 from config.config import LiveConfig
@@ -64,13 +73,19 @@ def create_app() -> FastAPI:
     """
     Create and configure the FastAPI application.
 
+    Phase 6, Section 14: End-to-End Integration
+
+    Provides two WebSocket endpoints:
+    - /live: Full pipeline integration with voice support
+    - /live/legacy: Original handler for backward compatibility
+
     Returns:
         Configured FastAPI application instance
     """
     app = FastAPI(
         title="Jarvis-Granite Live Telemetry",
         description="Real-time F1 telemetry analysis with AI race engineer",
-        version="2.1.0"
+        version="2.2.0"
     )
 
     # Load configuration
@@ -83,8 +98,14 @@ def create_app() -> FastAPI:
     # Create LLM client
     llm_client = create_llm_client()
 
-    # Create shared WebSocket handler with LLM support
-    handler = WebSocketHandler(
+    # Create IntegrationPipeline for full end-to-end integration
+    pipeline = IntegrationPipeline(
+        config=config,
+        llm_client=llm_client,
+    )
+
+    # Create legacy WebSocket handler for backward compatibility
+    legacy_handler = WebSocketHandler(
         thresholds=config.thresholds,
         llm_client=llm_client,
         config=config,
@@ -92,12 +113,18 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
-        """Health check endpoint for monitoring."""
+        """
+        Health check endpoint for monitoring.
+
+        Returns pipeline health status and component states.
+        """
+        health = pipeline.health_check()
         return {
-            "status": "healthy",
+            "status": health["status"],
             "timestamp": _utcnow_iso(),
-            "active_sessions": len(handler.active_sessions),
-            "ai_enabled": handler.race_engineer_agent is not None,
+            "active_sessions": health["active_sessions"],
+            "ai_enabled": pipeline.race_engineer_agent is not None,
+            "components": health["components"],
         }
 
     @app.get("/config")
@@ -113,12 +140,32 @@ def create_app() -> FastAPI:
                 "gap_change_threshold": config.thresholds.gap_change_threshold,
             },
             "min_proactive_interval": config.min_proactive_interval_seconds,
+            "voice_enabled": config.voice.enable_voice,
+            "livekit_url": config.livekit.url,
+        }
+
+    @app.get("/stats")
+    async def get_stats():
+        """
+        Get pipeline statistics.
+
+        Returns processing statistics and session information.
+        """
+        return {
+            "timestamp": _utcnow_iso(),
+            **pipeline.get_stats(),
         }
 
     @app.websocket("/live")
     async def websocket_endpoint(websocket: WebSocket):
         """
         WebSocket endpoint for live telemetry streaming.
+
+        Full Pipeline Integration (Phase 6, Section 14):
+        - Telemetry -> Event Detection -> LLM Response -> Voice Output
+        - Session lifecycle: init -> active -> end
+        - LiveKit token in session_confirmed for voice communication
+        - Interrupt handling for high-priority events
 
         Connection Flow:
         1. Client connects to /live
@@ -145,23 +192,71 @@ def create_app() -> FastAPI:
                     )
                     continue
 
-                # Route message through handler
-                result = await handler.handle_message(data, websocket, session_id)
+                # Route message through IntegrationPipeline
+                result = await pipeline.handle_websocket_message(
+                    data, websocket, session_id
+                )
 
                 # Track session_id after initialization
-                if result and result.get("session_id"):
-                    session_id = result["session_id"]
+                if result and result.get("type") == "session_confirmed":
+                    session_id = result.get("session_id")
+                    # Send the session_confirmed response
+                    await websocket.send_json(result)
+                elif result and result.get("type") == "error":
+                    await websocket.send_json(result)
+                elif data.get("type") == "session_init" and result:
+                    # Handle session_init response format
+                    session_id = result.get("session_id")
+                    await websocket.send_json(result)
 
         except WebSocketDisconnect:
             # Clean up on disconnect
-            if session_id and session_id in handler.active_sessions:
-                del handler.active_sessions[session_id]
+            if session_id:
+                await pipeline.end_session(session_id)
                 logger.info(f"Session {session_id} disconnected")
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
             # Clean up on error
-            if session_id and session_id in handler.active_sessions:
-                del handler.active_sessions[session_id]
+            if session_id:
+                await pipeline.end_session(session_id)
+
+    @app.websocket("/live/legacy")
+    async def websocket_legacy_endpoint(websocket: WebSocket):
+        """
+        Legacy WebSocket endpoint for backward compatibility.
+
+        Uses the original WebSocketHandler implementation.
+        """
+        await websocket.accept()
+
+        session_id: Optional[str] = None
+
+        try:
+            while True:
+                try:
+                    raw_data = await websocket.receive_text()
+                    data = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    await _send_error(
+                        websocket,
+                        "VALIDATION_ERROR",
+                        "Invalid JSON format"
+                    )
+                    continue
+
+                result = await legacy_handler.handle_message(data, websocket, session_id)
+
+                if result and result.get("session_id"):
+                    session_id = result["session_id"]
+
+        except WebSocketDisconnect:
+            if session_id and session_id in legacy_handler.active_sessions:
+                del legacy_handler.active_sessions[session_id]
+                logger.info(f"Legacy session {session_id} disconnected")
+        except Exception as e:
+            logger.error(f"Legacy WebSocket error: {e}")
+            if session_id and session_id in legacy_handler.active_sessions:
+                del legacy_handler.active_sessions[session_id]
 
     return app
 
