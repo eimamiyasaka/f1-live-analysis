@@ -300,3 +300,48 @@
 
   - With: Full Granite LLM responses (natural language race engineer)
   - Without: Fallback rule-based responses (still functional, demonstrates graceful degradation)
+
+  Voice Demo Script
+
+  Usage
+
+  Generate all sample responses:
+  python demo_voice.py
+
+  Generate custom text:
+  python demo_voice.py --text "Box this lap, we need fresh tires"
+
+  Interactive mode:
+  python demo_voice.py --custom
+
+  Setup Required
+
+  Add Watson TTS credentials to your .env file:
+  WATSON_TTS_API_KEY=your_actual_key
+  WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
+
+  What It Generates
+
+  | File                         | Trigger         | Sample Text                                               |
+  |------------------------------|-----------------|-----------------------------------------------------------|
+  | 01_fuel_warning.wav          | Fuel Warning    | "Fuel is getting low. You have about 4 laps remaining..." |
+  | 02_tire_critical.wav         | Tire Critical   | "Box box box! Front right is critical..."                 |
+  | 03_gap_closing.wav           | Gap Change      | "Gap to Hamilton is down to 1.2 seconds..."               |
+  | 04_lap_complete.wav          | Lap Complete    | "Good lap. P3, 1:21.4..."                                 |
+  | 05_position_change.wav       | Position Change | "Great move! You're now P2..."                            |
+  | 06_driver_query_tires.wav    | Driver Query    | "Fronts are at 45% wear, rears at 38%..."                 |
+  | 07_driver_query_strategy.wav | Driver Query    | "Current plan is to stay out..."                          |
+  | 08_safety_car.wav            | Safety Car      | "Safety car deployed. Box box box!..."                    |
+
+  Output
+
+  Audio files saved to: voice_demo_output/
+
+  - British male voice (en-GB_JamesV3Voice)
+  - WAV format (playable in any media player)
+  - Double-click to play on Windows
+
+  Without Credentials
+
+  If you run without credentials, it creates a README.md showing what would be generated - useful for documentation
+  screenshots.
