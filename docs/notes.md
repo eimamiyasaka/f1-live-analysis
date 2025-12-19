@@ -345,3 +345,68 @@
 
   If you run without credentials, it creates a README.md showing what would be generated - useful for documentation
   screenshots.
+
+
+
+  ---
+  What You Need to Do
+
+  1. IBM Configuration (Environment Variables)
+
+  Set these in your .env file or environment:
+
+  # IBM watsonx.ai (Granite LLM)
+  WATSONX_API_KEY=your_api_key
+  WATSONX_PROJECT_ID=your_project_id
+  WATSONX_URL=https://us-south.ml.cloud.ibm.com
+
+  # IBM Watson Speech Services
+  WATSON_TTS_API_KEY=your_tts_api_key
+  WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
+  WATSON_STT_API_KEY=your_stt_api_key
+  WATSON_STT_URL=https://api.us-south.speech-to-text.watson.cloud.ibm.com
+
+  To get credentials:
+  1. Log in to IBM Cloud (cloud.ibm.com)
+  2. Create/access Watson Speech to Text, Text to Speech, and watsonx.ai services
+  3. Copy API keys from each service's "Manage" page
+  4. For watsonx.ai, also get your Project ID from the project settings
+
+  2. LiveKit Server Setup
+
+  Note from docs: LiveKit cannot be installed through pip - it needs to be run separately.
+
+  Option A: Run LiveKit locally with Docker:
+  docker run -d \
+    -p 7880:7880 \
+    -p 7881:7881 \
+    -e LIVEKIT_KEYS="devkey: secret" \
+    livekit/livekit-server
+
+  Option B: Deploy on IBM Cloud Kubernetes:
+  kubectl apply -f https://raw.githubusercontent.com/livekit/livekit-helm/main/livekit-server.yaml
+  kubectl expose deployment livekit-server --type=LoadBalancer --port=7880
+
+  Option C: Use LiveKit Cloud (managed service):
+  - Sign up at livekit.io
+  - Get credentials from dashboard
+  - Cost: ~$0.004/minute
+
+  Add LiveKit credentials to .env:
+  LIVEKIT_API_KEY=devkey        # or your LiveKit Cloud key
+  LIVEKIT_API_SECRET=secret     # or your LiveKit Cloud secret
+  LIVEKIT_URL=ws://localhost:7880  # or wss://your-livekit-server.com
+
+  3. Running the Application
+
+  # Install dependencies
+  pip install -r requirements.txt
+
+  # Run the server
+  uvicorn jarvis_granite.live.main:app --reload --port 8001
+
+  4. Remaining Phase 7 Tasks (Deployment)
+
+  From the docs, these are still pending:
+  - Section 17: Create Dockerfile, configure for IBM Cloud Code Engine
+  - Section 18: Deploy LiveKit, configure TURN servers for NAT traversal  

@@ -13,6 +13,18 @@ Phase 6, Section 14: End-to-End Integration
 - Add LiveKit token to session_confirmed response
 - Full pipeline: Telemetry -> Event -> LLM -> Voice
 
+Phase 6, Section 16: Performance Optimization
+- Profile end-to-end latency (target: <3000ms)
+- Optimize bottlenecks
+- Add metrics logging
+
+Performance Targets:
+- Telemetry processing: <50ms (rule-based, no LLM)
+- LLM response: <2000ms (Granite generation via LangChain)
+- TTS conversion: <500ms (Watson TTS with Tenacity retry)
+- LiveKit transport: <100ms (WebRTC jitter buffering)
+- End-to-end (voice): <3000ms (Total pipeline latency)
+
 Example:
     pipeline = IntegrationPipeline(config=live_config, llm_client=llm_client)
 
@@ -28,6 +40,9 @@ Example:
 
     # Handle driver query
     response = await pipeline.handle_driver_query("race_001", "How are my tires?")
+
+    # Get performance report
+    report = pipeline.get_performance_report()
 
     # End session
     await pipeline.end_session("race_001")
@@ -54,6 +69,11 @@ from jarvis_granite.live.errors import (
     SessionNotFoundError,
     ValidationError,
     create_error_response,
+)
+from jarvis_granite.live.performance import (
+    PerformanceMetrics,
+    profile_latency,
+    profile_latency_async,
 )
 from jarvis_granite.agents.telemetry_agent import TelemetryAgent
 from jarvis_granite.agents.race_engineer_agent import RaceEngineerAgent
@@ -124,6 +144,9 @@ class IntegrationPipeline:
             llm_client: Optional LLM client for AI response generation.
         """
         self.config = config or LiveConfig()
+
+        # Phase 6, Section 16: Performance Metrics
+        self.performance_metrics = PerformanceMetrics()
 
         # Create telemetry agent
         self.telemetry_agent = TelemetryAgent(thresholds=self.config.thresholds)
@@ -294,6 +317,11 @@ class IntegrationPipeline:
         4. Generate AI response via RaceEngineerAgent (if events)
         5. Send to voice pipeline for TTS (if enabled)
 
+        Performance tracking (Phase 6, Section 16):
+        - telemetry_processing: Time for context update + event detection
+        - llm_response: Time for LLM response generation
+        - end_to_end: Total pipeline time
+
         Args:
             session_id: Session to process for
             telemetry: Telemetry data to process
@@ -323,6 +351,9 @@ class IntegrationPipeline:
         }
 
         try:
+            # Track telemetry processing time (target: <50ms)
+            telemetry_start = time.time()
+
             # Update context with telemetry
             context.update(telemetry)
             session.stats["telemetry_count"] += 1
@@ -331,6 +362,10 @@ class IntegrationPipeline:
             # Detect events
             events = self.telemetry_agent.detect_events(telemetry, context)
             result["events"] = [{"type": e.type, "priority": e.priority.name} for e in events]
+
+            # Record telemetry processing latency
+            telemetry_latency_ms = (time.time() - telemetry_start) * 1000
+            self.performance_metrics.record("telemetry_processing", telemetry_latency_ms)
 
             if events:
                 session.stats["events_detected"] += len(events)
@@ -356,10 +391,17 @@ class IntegrationPipeline:
                 min_interval = self.config.min_proactive_interval_seconds
                 if context.can_send_proactive(min_interval) or highest_event.priority == Priority.CRITICAL:
                     try:
+                        # Track LLM response time (target: <2000ms)
+                        llm_start = time.time()
+
                         response = await self.race_engineer_agent.generate_proactive_response(
                             event=highest_event,
                             context=context,
                         )
+
+                        # Record LLM latency
+                        llm_latency_ms = (time.time() - llm_start) * 1000
+                        self.performance_metrics.record("llm_response", llm_latency_ms)
 
                         if response:
                             result["ai_response"] = response
@@ -370,7 +412,11 @@ class IntegrationPipeline:
                             # Send to voice pipeline if enabled
                             if self.config.voice.enable_voice and self.voice_pipeline.tts_client:
                                 try:
+                                    # Track TTS conversion time (target: <500ms)
+                                    tts_start = time.time()
                                     await self.voice_pipeline.deliver_response(response)
+                                    tts_latency_ms = (time.time() - tts_start) * 1000
+                                    self.performance_metrics.record("tts_conversion", tts_latency_ms)
                                 except Exception as e:
                                     logger.error(f"Voice pipeline error: {e}")
                                     # Continue - AI response is still available
@@ -409,8 +455,9 @@ class IntegrationPipeline:
                     "is_transient": True,
                 }
 
-        # Calculate latency
+        # Calculate and record end-to-end latency (target: <3000ms)
         result["latency_ms"] = int((time.time() - start_time) * 1000)
+        self.performance_metrics.record("end_to_end", float(result["latency_ms"]))
 
         return result
 
@@ -832,6 +879,37 @@ class IntegrationPipeline:
         return {
             "active_sessions": len(self._sessions),
             **self._stats,
+        }
+
+    def get_performance_report(self) -> Dict[str, Any]:
+        """
+        Get performance report with metrics, compliance, and bottlenecks.
+
+        Phase 6, Section 16: Performance Optimization
+
+        Returns comprehensive performance report including:
+        - Summary of all metrics (avg, p50, p95, p99)
+        - Compliance status against targets
+        - Identified bottlenecks
+
+        Returns:
+            Performance report dictionary
+
+        Example:
+            report = pipeline.get_performance_report()
+            if report["compliance"]["llm_response"]["compliant"]:
+                print("LLM latency within target")
+        """
+        return {
+            "summary": self.performance_metrics.get_summary(),
+            "compliance": self.performance_metrics.check_compliance(),
+            "targets": {
+                "telemetry_processing": "<50ms",
+                "llm_response": "<2000ms",
+                "tts_conversion": "<500ms",
+                "end_to_end": "<3000ms",
+            },
+            "bottlenecks": self.performance_metrics.identify_bottlenecks(),
         }
 
     def health_check(self) -> Dict[str, Any]:

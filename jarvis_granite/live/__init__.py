@@ -40,6 +40,13 @@ from jarvis_granite.live.errors import (
     create_error_response_from_exception,
     is_transient_error,
 )
+from jarvis_granite.live.performance import (
+    PerformanceMetrics,
+    profile_latency,
+    profile_latency_async,
+    profile,
+    profile_async,
+)
 
 __all__ = [
     "LiveSessionContext",
@@ -78,4 +85,10 @@ __all__ = [
     "create_error_response",
     "create_error_response_from_exception",
     "is_transient_error",
+    # Performance monitoring (Phase 6, Section 16)
+    "PerformanceMetrics",
+    "profile_latency",
+    "profile_latency_async",
+    "profile",
+    "profile_async",
 ]
