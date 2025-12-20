@@ -301,6 +301,8 @@
   - With: Full Granite LLM responses (natural language race engineer)
   - Without: Fallback rule-based responses (still functional, demonstrates graceful degradation)
 
+
+
   Voice Demo Script
 
   Usage
