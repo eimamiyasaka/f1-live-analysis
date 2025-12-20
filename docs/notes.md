@@ -414,3 +414,4 @@
   - Section 18: Deploy LiveKit, configure TURN servers for NAT traversal
 
 Couldn't set up the .env file for IBM credentials (watsonx stuff not working, not sure about stt/tts)
+Tried making sure to install langchain and ibmwatsonx on 3.13 instead of 3.12 which is what's used when running pip but still doesn't work
