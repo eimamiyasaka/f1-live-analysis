@@ -24,7 +24,7 @@ For blog screenshots, you can capture:
 import asyncio
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Check for websockets library
 try:
@@ -131,7 +131,7 @@ async def run_demo():
 
             normal_telemetry = {
                 "type": "telemetry",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "data": {
                     "speed_kmh": 285.5,
                     "rpm": 12500,
@@ -166,7 +166,7 @@ async def run_demo():
 
             low_fuel_telemetry = {
                 "type": "telemetry",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "data": {
                     "speed_kmh": 265.0,
                     "rpm": 11800,
@@ -214,7 +214,7 @@ async def run_demo():
 
             hot_tires_telemetry = {
                 "type": "telemetry",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "data": {
                     "speed_kmh": 245.0,
                     "rpm": 11200,
@@ -261,7 +261,7 @@ async def run_demo():
 
             query = {
                 "type": "text_query",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "query": "What's my tire situation?"
             }
 
