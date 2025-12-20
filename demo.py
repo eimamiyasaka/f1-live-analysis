@@ -292,12 +292,12 @@ async def run_demo():
             print(f"{Colors.GREEN}Session ended successfully{Colors.ENDC}")
 
             print_header("DEMO COMPLETE")
-            print("Screenshots you can capture:")
-            print("  1. This terminal output")
-            print("  2. http://localhost:8000/health - Health status")
-            print("  3. http://localhost:8000/stats - Statistics")
-            print("  4. http://localhost:8000/config - Configuration")
-            print("  5. http://localhost:8000/docs - API Documentation (Swagger UI)")
+            # print("Screenshots you can capture:")
+            # print("  1. This terminal output")
+            # print("  2. http://localhost:8000/health - Health status")
+            # print("  3. http://localhost:8000/stats - Statistics")
+            # print("  4. http://localhost:8000/config - Configuration")
+            # print("  5. http://localhost:8000/docs - API Documentation (Swagger UI)")
 
     except ConnectionRefusedError:
         print(f"\n{Colors.RED}ERROR: Could not connect to server{Colors.ENDC}")

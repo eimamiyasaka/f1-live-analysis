@@ -411,4 +411,6 @@
 
   From the docs, these are still pending:
   - Section 17: Create Dockerfile, configure for IBM Cloud Code Engine
-  - Section 18: Deploy LiveKit, configure TURN servers for NAT traversal  
+  - Section 18: Deploy LiveKit, configure TURN servers for NAT traversal
+
+Couldn't set up the .env file for IBM credentials (watsonx stuff not working, not sure about stt/tts)
