@@ -4,13 +4,13 @@
 Driver, 4 laps of fuel left. Monza's long straights favor pitting soon. Estimate 10-second stop. Your call.
 
 ## 02_tire_critical
-Driver, box now! Front right tire temp critically high, 118C, degrading fast. Don't wait, box immediately!
+Driver, box now! Front right tire critically overheating at 118C, degrading fast. Immediate action required!
 
 ## 03_gap_closing
 Lewis, Verstappen's closing fast. Maintain your line, defend aggressively. Don't overcook Turn 1, save DRS for the straight.
 
 ## 04_lap_complete
-Excellent lap, driver! Matching the leader's pace, keep pushing for P2!
+Excellent lap, driver! Matching the leader's pace, keep it up for the final stint!
 
 ## 05_position_change
 Excellent work, driver! You're closing the gap. Stay focused, 12 laps to go, we've got this!

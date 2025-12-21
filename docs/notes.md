@@ -412,3 +412,6 @@
   From the docs, these are still pending:
   - Section 17: Create Dockerfile, configure for IBM Cloud Code Engine
   - Section 18: Deploy LiveKit, configure TURN servers for NAT traversal
+
+
+There's a deprecation warning for ibm/granite-3-8b-instruct (deprecated 2025-11-24, removal 2026-02-22). The recommended alternative is ibm/granite-4-h-small.
