@@ -2,14 +2,18 @@
 """
 Jarvis-Granite Voice Demo Script
 
-Generates audio files from AI race engineer responses using Watson TTS.
-No LiveKit required - just Watson TTS credentials.
+Generates audio files from AI race engineer responses using:
+- IBM WatsonX Granite LLM for generating responses
+- IBM Watson TTS for converting text to speech
 
 Setup:
     1. Copy .env.example to .env
-    2. Add your Watson TTS credentials:
-       WATSON_TTS_API_KEY=your_key
-       WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com
+    2. Add your IBM credentials:
+       WATSONX_API_KEY=your_key
+       WATSONX_PROJECT_ID=your_project_id
+       WATSONX_URL=https://eu-gb.ml.cloud.ibm.com
+       WATSON_TTS_API_KEY=your_tts_key
+       WATSON_TTS_URL=https://api.eu-gb.text-to-speech.watson.cloud.ibm.com
 
 Run:
     python demo_voice.py
@@ -21,8 +25,13 @@ Output:
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -61,55 +70,56 @@ def print_generating(text: str):
     print(f"{Colors.YELLOW}[GENERATING]{Colors.ENDC} {text}")
 
 
-# Sample race engineer responses to demonstrate
-SAMPLE_RESPONSES = [
+# Scenarios for the LLM to generate responses for
+SCENARIOS = [
     {
         "id": "01_fuel_warning",
         "trigger": "Fuel Warning",
-        "text": "Fuel is getting low. You have about 4 laps remaining. Consider boxing at the end of this lap for fuel and fresh mediums."
+        "prompt": "You are an F1 race engineer. The driver has only 4 laps of fuel remaining and is in P3 at Monza. Give a brief, urgent radio message about fuel and pitting strategy. Keep it under 30 words.",
     },
     {
         "id": "02_tire_critical",
         "trigger": "Tire Critical",
-        "text": "Box box box! Front right is critical. Pit this lap, we're losing too much time."
+        "prompt": "You are an F1 race engineer. The front right tire temperature is critical at 118C and degrading fast. Tell the driver to box immediately. Keep it under 20 words, be urgent.",
     },
     {
         "id": "03_gap_closing",
         "trigger": "Gap Change",
-        "text": "Gap to Hamilton is down to 1.2 seconds. He's pushing hard. Defend into turn 1, use the DRS on the straight."
+        "prompt": "You are an F1 race engineer. Hamilton behind has closed the gap from 2.5s to 1.2s in 3 laps. Warn the driver and give defensive advice. Keep it under 30 words.",
     },
     {
         "id": "04_lap_complete",
         "trigger": "Lap Complete",
-        "text": "Good lap. P3, 1:21.4. You're matching the leader's pace. Keep it clean."
+        "prompt": "You are an F1 race engineer. The driver just completed lap 42 with a time of 1:21.456, matching the leader's pace. They're in P3. Give brief positive feedback. Keep it under 20 words.",
     },
     {
         "id": "05_position_change",
         "trigger": "Position Change",
-        "text": "Great move! You're now P2. Verstappen is 3.5 seconds ahead. 12 laps to go."
+        "prompt": "You are an F1 race engineer. The driver just overtook Leclerc and is now P2, 3.5 seconds behind Verstappen with 12 laps to go. Give an encouraging update. Keep it under 25 words.",
     },
     {
         "id": "06_driver_query_tires",
         "trigger": "Driver Query: Tires",
-        "text": "Fronts are at 45% wear, rears at 38%. Temps are good, you should make it to the end but manage them through the chicanes."
+        "prompt": "You are an F1 race engineer. The driver asks 'How are my tires?'. Front left is at 95C/45% wear, front right at 98C/48% wear, rears are cooler at 88C/35% wear. Give a concise answer. Keep it under 30 words.",
     },
     {
         "id": "07_driver_query_strategy",
         "trigger": "Driver Query: Strategy",
-        "text": "Current plan is to stay out. If the safety car comes, we box immediately for softs. Otherwise, push to the end on these mediums."
+        "prompt": "You are an F1 race engineer. The driver asks 'What's the plan?'. Current strategy is to stay out on mediums unless safety car, then pit for softs. 15 laps remaining. Explain briefly. Keep it under 30 words.",
     },
     {
         "id": "08_safety_car",
         "trigger": "Safety Car",
-        "text": "Safety car deployed. Box box box! This is our chance. Pit for softs, we'll come out P4 but with a tire advantage."
+        "prompt": "You are an F1 race engineer. Safety car just deployed due to debris. This is the perfect time to pit. Tell the driver to box immediately for fresh soft tires. Be urgent. Keep it under 25 words.",
     },
 ]
 
 
 async def generate_audio_files():
-    """Generate audio files from sample responses."""
+    """Generate audio files from LLM-generated responses."""
 
     print_header("JARVIS-GRANITE VOICE DEMO")
+    print_info("This demo uses LLM to generate responses, then TTS to speak them\n")
 
     # Check for credentials
     try:
@@ -118,124 +128,150 @@ async def generate_audio_files():
     except ImportError:
         print_info("python-dotenv not installed, using environment variables directly")
 
-    api_key = os.getenv("WATSON_TTS_API_KEY")
-    service_url = os.getenv("WATSON_TTS_URL", "https://api.us-south.text-to-speech.watson.cloud.ibm.com")
+    # Check LLM credentials
+    watsonx_api_key = os.getenv("WATSONX_API_KEY")
+    watsonx_project_id = os.getenv("WATSONX_PROJECT_ID")
+    watsonx_url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
 
-    if not api_key or api_key == "your_tts_api_key":
-        print_error("Watson TTS credentials not configured!")
+    # Check TTS credentials
+    tts_api_key = os.getenv("WATSON_TTS_API_KEY")
+    tts_url = os.getenv("WATSON_TTS_URL", "https://api.us-south.text-to-speech.watson.cloud.ibm.com")
+
+    missing_creds = []
+    if not watsonx_api_key:
+        missing_creds.append("WATSONX_API_KEY")
+    if not watsonx_project_id:
+        missing_creds.append("WATSONX_PROJECT_ID")
+    if not tts_api_key:
+        missing_creds.append("WATSON_TTS_API_KEY")
+
+    if missing_creds:
+        print_error(f"Missing credentials: {', '.join(missing_creds)}")
         print()
-        print("To set up Watson TTS:")
-        print(f"  1. Create IBM Cloud account: {Colors.CYAN}https://cloud.ibm.com{Colors.ENDC}")
-        print(f"  2. Create Text-to-Speech service")
-        print(f"  3. Copy API key and URL to your .env file:")
-        print()
-        print(f"     {Colors.YELLOW}WATSON_TTS_API_KEY=your_actual_key{Colors.ENDC}")
-        print(f"     {Colors.YELLOW}WATSON_TTS_URL=https://api.us-south.text-to-speech.watson.cloud.ibm.com{Colors.ENDC}")
-        print()
-
-        # Offer to create placeholder files for demonstration
-        print_header("DEMO MODE (No Audio)")
-        print("Creating placeholder info files to show what would be generated...\n")
-
-        output_dir = Path("voice_demo_output")
-        output_dir.mkdir(exist_ok=True)
-
-        # Create a README in the output folder
-        readme_content = "# Voice Demo Output\n\n"
-        readme_content += "This folder would contain .wav audio files of the AI race engineer.\n\n"
-        readme_content += "## Sample Responses\n\n"
-
-        for response in SAMPLE_RESPONSES:
-            readme_content += f"### {response['id']}.wav\n"
-            readme_content += f"**Trigger:** {response['trigger']}\n\n"
-            readme_content += f"> \"{response['text']}\"\n\n"
-            print(f"{Colors.CYAN}[{response['trigger']}]{Colors.ENDC}")
-            print(f"  \"{response['text'][:60]}...\"\n")
-
-        readme_content += "\n## Setup Instructions\n\n"
-        readme_content += "1. Get Watson TTS credentials from IBM Cloud\n"
-        readme_content += "2. Add to .env file\n"
-        readme_content += "3. Run `python demo_voice.py` again\n"
-
-        readme_path = output_dir / "README.md"
-        readme_path.write_text(readme_content)
-
-        print_success(f"Created {readme_path}")
-        print(f"\n{Colors.YELLOW}Add Watson TTS credentials to .env and run again to generate actual audio.{Colors.ENDC}")
+        print("Required environment variables:")
+        print(f"  {Colors.YELLOW}WATSONX_API_KEY=your_key{Colors.ENDC}")
+        print(f"  {Colors.YELLOW}WATSONX_PROJECT_ID=your_project_id{Colors.ENDC}")
+        print(f"  {Colors.YELLOW}WATSONX_URL=https://eu-gb.ml.cloud.ibm.com{Colors.ENDC}")
+        print(f"  {Colors.YELLOW}WATSON_TTS_API_KEY=your_tts_key{Colors.ENDC}")
+        print(f"  {Colors.YELLOW}WATSON_TTS_URL=https://api.eu-gb.text-to-speech.watson.cloud.ibm.com{Colors.ENDC}")
         return
 
-    # Credentials exist - generate actual audio
-    print_info(f"Using Watson TTS at: {service_url}")
-    print_info("Voice: en-GB_JamesV3Voice (British Male)\n")
-
-    # Import the TTS client
+    # Import clients
     try:
         from jarvis_granite.voice.watson_tts import WatsonTTSClient
+        from jarvis_granite.llm import LLMClient
     except ImportError as e:
-        print_error(f"Could not import WatsonTTSClient: {e}")
+        print_error(f"Could not import required modules: {e}")
         print("Make sure all dependencies are installed: pip install -r requirements.txt")
         return
+
+    # Show configuration
+    print_info(f"LLM: WatsonX Granite at {watsonx_url}")
+    print_info(f"TTS: Watson TTS at {tts_url}")
+    print_info("Voice: en-GB_JamesV3Voice (British Male)\n")
 
     # Create output directory
     output_dir = Path("voice_demo_output")
     output_dir.mkdir(exist_ok=True)
 
+    # Create LLM client
+    llm_client = LLMClient(
+        watsonx_url=watsonx_url,
+        watsonx_project_id=watsonx_project_id,
+        watsonx_api_key=watsonx_api_key,
+        max_tokens=100,
+        temperature=0.7,
+    )
+
     # Create TTS client
     tts_client = WatsonTTSClient(
-        api_key=api_key,
-        service_url=service_url,
-        voice="en-GB_JamesV3Voice",  # British male voice - sounds like race engineer
+        api_key=tts_api_key,
+        service_url=tts_url,
+        voice="en-GB_JamesV3Voice",
         timeout=30.0
     )
 
-    print_header("GENERATING AUDIO FILES")
+    print_header("GENERATING LLM RESPONSES + AUDIO")
 
     generated_files = []
+    llm_times = []
+    tts_times = []
 
-    for response in SAMPLE_RESPONSES:
-        filename = f"{response['id']}.wav"
+    for scenario in SCENARIOS:
+        filename = f"{scenario['id']}.wav"
         filepath = output_dir / filename
 
-        print_generating(f"{response['trigger']}")
-        print(f"  Text: \"{response['text'][:50]}...\"")
+        print(f"\n{Colors.CYAN}[{scenario['trigger']}]{Colors.ENDC}")
 
+        # Step 1: Generate response with LLM
+        print_generating("LLM response...")
         try:
-            # Generate audio
-            audio_bytes = await tts_client.synthesize(response['text'])
+            llm_start = time.time()
+            response_text = await llm_client.invoke(scenario['prompt'])
+            llm_time = (time.time() - llm_start) * 1000
+            llm_times.append(llm_time)
+
+            # Clean up response (remove quotes if present)
+            response_text = response_text.strip().strip('"').strip("'")
+
+            print_success(f"LLM ({llm_time:.0f}ms): \"{response_text[:60]}{'...' if len(response_text) > 60 else ''}\"")
+
+        except Exception as e:
+            print_error(f"LLM failed: {e}")
+            continue
+
+        # Step 2: Convert to audio with TTS
+        print_generating("TTS audio...")
+        try:
+            tts_start = time.time()
+            audio_bytes = await tts_client.synthesize(response_text)
+            tts_time = (time.time() - tts_start) * 1000
+            tts_times.append(tts_time)
 
             # Save to file
             filepath.write_bytes(audio_bytes)
 
-            # Calculate duration estimate (rough: ~150 words/min for speech)
-            word_count = len(response['text'].split())
-            duration_est = word_count / 2.5  # ~2.5 words per second
+            # Calculate duration estimate
+            word_count = len(response_text.split())
+            duration_est = word_count / 2.5
 
-            print_success(f"Saved: {filepath} ({len(audio_bytes):,} bytes, ~{duration_est:.1f}s)")
-            generated_files.append(filepath)
+            print_success(f"TTS ({tts_time:.0f}ms): Saved {filepath.name} ({len(audio_bytes):,} bytes, ~{duration_est:.1f}s)")
+            generated_files.append((filepath, response_text))
 
         except Exception as e:
-            print_error(f"Failed to generate {filename}: {e}")
-
-        print()
+            print_error(f"TTS failed: {e}")
 
     # Summary
     print_header("DEMO COMPLETE")
 
     if generated_files:
         print_success(f"Generated {len(generated_files)} audio files in: {output_dir.absolute()}\n")
+
         print("Files created:")
-        for f in generated_files:
-            print(f"  - {f.name}")
+        for filepath, text in generated_files:
+            print(f"  - {filepath.name}")
 
-        print(f"\n{Colors.CYAN}Play these files to hear the AI race engineer voice!{Colors.ENDC}")
+        print(f"\n{Colors.CYAN}Play these files to hear the AI race engineer!{Colors.ENDC}")
         print(f"\nOn Windows: double-click any .wav file")
-        print(f"On Mac/Linux: afplay {generated_files[0]} or aplay {generated_files[0]}")
+        print(f"On Mac/Linux: afplay {generated_files[0][0]} or aplay {generated_files[0][0]}")
 
-        # Get stats
-        stats = tts_client.get_stats()
-        print(f"\n{Colors.BLUE}TTS Statistics:{Colors.ENDC}")
-        print(f"  Requests: {stats['total_requests']}")
-        print(f"  Avg Latency: {stats['average_latency_ms']:.0f}ms")
+        # Statistics
+        print(f"\n{Colors.BLUE}Performance Statistics:{Colors.ENDC}")
+        if llm_times:
+            print(f"  LLM Avg Latency: {sum(llm_times)/len(llm_times):.0f}ms")
+        if tts_times:
+            print(f"  TTS Avg Latency: {sum(tts_times)/len(tts_times):.0f}ms")
+        print(f"  Total Responses: {len(generated_files)}")
+
+        # Save responses to a text file for reference
+        responses_file = output_dir / "responses.txt"
+        with open(responses_file, "w", encoding="utf-8") as f:
+            f.write("# LLM-Generated Race Engineer Responses\n\n")
+            for filepath, text in generated_files:
+                f.write(f"## {filepath.stem}\n")
+                f.write(f"{text}\n\n")
+        print(f"\n  Responses saved to: {responses_file}")
+
     else:
         print_error("No audio files were generated. Check your credentials.")
 
