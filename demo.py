@@ -193,7 +193,7 @@ async def run_demo():
 
             # Wait for and display AI response
             try:
-                response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                response = await asyncio.wait_for(websocket.recv(), timeout=15.0)
                 data = json.loads(response)
                 if data.get("type") == "ai_response":
                     print_event("fuel_warning", "HIGH")
@@ -203,7 +203,7 @@ async def run_demo():
                         data.get("latency_ms", 0)
                     )
             except asyncio.TimeoutError:
-                print(f"{Colors.YELLOW}(No AI response - may need IBM credentials){Colors.ENDC}")
+                print(f"{Colors.YELLOW}(No fuel event - requires lap completion to calculate consumption rate){Colors.ENDC}")
 
             await asyncio.sleep(2)
 
@@ -240,7 +240,7 @@ async def run_demo():
             await websocket.send(json.dumps(hot_tires_telemetry))
 
             try:
-                response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                response = await asyncio.wait_for(websocket.recv(), timeout=15.0)
                 data = json.loads(response)
                 if data.get("type") == "ai_response":
                     print_event("tire_critical", "CRITICAL")
@@ -250,7 +250,7 @@ async def run_demo():
                         data.get("latency_ms", 0)
                     )
             except asyncio.TimeoutError:
-                print(f"{Colors.YELLOW}(No AI response - may need IBM credentials){Colors.ENDC}")
+                print(f"{Colors.YELLOW}(AI response timeout - LLM may be slow or unavailable){Colors.ENDC}")
 
             await asyncio.sleep(2)
 
@@ -269,7 +269,7 @@ async def run_demo():
             await websocket.send(json.dumps(query))
 
             try:
-                response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                response = await asyncio.wait_for(websocket.recv(), timeout=15.0)
                 data = json.loads(response)
                 if data.get("type") == "ai_response":
                     print_ai_response(
@@ -278,7 +278,7 @@ async def run_demo():
                         data.get("latency_ms", 0)
                     )
             except asyncio.TimeoutError:
-                print(f"{Colors.YELLOW}(No AI response - may need IBM credentials){Colors.ENDC}")
+                print(f"{Colors.YELLOW}(AI response timeout - LLM may be slow or unavailable){Colors.ENDC}")
 
             await asyncio.sleep(1)
 
